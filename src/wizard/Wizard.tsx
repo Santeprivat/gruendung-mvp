@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import { fetchHello } from "../api/helloApi";
-import { processDefinition } from "./processDefinition";
 import { stepRegistry } from "./stepRegistry";
 
 import type { Vorgang } from "./vorgangTypes";
-import type { ProcessStep } from "./processTypes";
+import type { ProcessDefinition, ProcessStep } from "./processTypes";
 
-import { validateProcessDefinition } from "./validateProcessDefinition";
-
-// Prozessdefinition einmalig validieren (Runtime-Schutz)
-validateProcessDefinition(processDefinition);
+import { loadProcessDefinition } from "./loadProcessDefinition";
 
 /**
  * Wizard
@@ -17,20 +13,30 @@ validateProcessDefinition(processDefinition);
  *
  * Prozess-Interpreter für den Unternehmenslebenszyklus.
  *
- * Er sammelt fachliche Datenbeiträge (domainDataContributions),
- * interpretiert sie jedoch nicht.
+ * - lädt eine Prozessdefinition (JSON)
+ * - validiert diese zur Laufzeit
+ * - interpretiert den Prozess
+ * - sammelt fachliche Datenbeiträge (domainDataContributions)
+ *
+ * Fachliche Interpretation findet ausschließlich im Backend statt.
  */
 function Wizard() {
   // ─────────────────────────────
-  // Vorgangs-State (lokal, Mock)
+  // Prozessdefinition (extern, JSON)
   // ─────────────────────────────
-  const [vorgang, setVorgang] = useState<Vorgang>({
-    id: "local-vorgang-1",
-    status: "IN_PROGRESS",
-    currentStepId: processDefinition.initialStep,
-    domainDataContributions: {},
-  });
+  const [processDefinition, setProcessDefinition] =
+    useState<ProcessDefinition | null>(null);
+  const [processError, setProcessError] =
+    useState<string | null>(null);
 
+  // ─────────────────────────────
+  // Vorgang (lokal, Mock)
+  // ─────────────────────────────
+  const [vorgang, setVorgang] = useState<Vorgang | null>(null);
+
+  // ─────────────────────────────
+  // UI-Zustände für Seiteneffekte
+  // ─────────────────────────────
   const [status, setStatus] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle");
@@ -38,12 +44,81 @@ function Wizard() {
   const [error, setError] = useState<string>("");
 
   // ─────────────────────────────
+  // Prozessdefinition laden (einmalig)
+  // ─────────────────────────────
+  useEffect(() => {
+    loadProcessDefinition()
+      .then(setProcessDefinition)
+      .catch((err) => setProcessError(err.message));
+  }, []);
+
+  // ─────────────────────────────
+  // Vorgang initialisieren, sobald Prozess da ist
+  // ─────────────────────────────
+  useEffect(() => {
+    if (processDefinition && !vorgang) {
+      setVorgang({
+        id: "local-vorgang-1",
+        status: "IN_PROGRESS",
+        currentStepId: processDefinition.initialStep,
+        domainDataContributions: {},
+      });
+    }
+  }, [processDefinition, vorgang]);
+
+  // ─────────────────────────────
+  // Seiteneffekte beim Betreten eines Schritts
+  //
+  // WICHTIG:
+  // Dieser Effekt darf NICHT vorzeitig returnen,
+  // da Hooks immer in gleicher Reihenfolge
+  // ausgeführt werden müssen.
+  // ─────────────────────────────
+  useEffect(() => {
+    if (!processDefinition || !vorgang) return;
+
+    const stepDef =
+      processDefinition.steps[vorgang.currentStepId];
+
+    if (stepDef?.effect === "loadHello") {
+      setStatus("loading");
+      setError("");
+
+      fetchHello()
+        .then((result) => {
+          setData(result);
+          setStatus("success");
+        })
+        .catch(() => {
+          setError("Fehler beim Laden");
+          setStatus("error");
+        });
+    }
+  }, [processDefinition, vorgang?.currentStepId]);
+
+  // ─────────────────────────────
+  // Guards: Prozess & Vorgang
+  //
+  // Guards kommen NACH allen Hooks!
+  // ─────────────────────────────
+  if (processError) {
+    return <p>Fehler beim Laden des Prozesses: {processError}</p>;
+  }
+
+  if (!processDefinition) {
+    return <p>Lade Prozessdefinition …</p>;
+  }
+
+  if (!vorgang) {
+    return <p>Initialisiere Vorgang …</p>;
+  }
+
+  // ─────────────────────────────
   // Aktuelle Schrittdefinition (unsicherer Zugriff)
   // ─────────────────────────────
   const stepDefUnsafe =
     processDefinition.steps[vorgang.currentStepId];
 
-  // Guard gegen inkonsistente Prozessdefinition
   if (!stepDefUnsafe) {
     return (
       <p>
@@ -78,20 +153,22 @@ function Wizard() {
   // domainDataContribution:
   // Fachlicher Datenbeitrag dieses Schritts
   // im Unternehmenslebenszyklus.
-  //
-  // Der Wizard interpretiert diese Daten NICHT.
   // ─────────────────────────────
   function nextStep(domainDataContribution?: unknown) {
     if (!stepDef.next) return;
 
-    setVorgang((v) => ({
-      ...v,
-      domainDataContributions: {
-        ...v.domainDataContributions,
-        [v.currentStepId]: domainDataContribution ?? null,
-      },
-      currentStepId: stepDef.next!,
-    }));
+    setVorgang((v) => {
+      if (!v) return v;
+
+      return {
+        ...v,
+        domainDataContributions: {
+          ...v.domainDataContributions,
+          [v.currentStepId]: domainDataContribution ?? null,
+        },
+        currentStepId: stepDef.next!,
+      };
+    });
   }
 
   // ─────────────────────────────
@@ -100,31 +177,14 @@ function Wizard() {
   function prevStep() {
     if (!stepDef.back) return;
 
-    setVorgang((v) => ({
-      ...v,
-      currentStepId: stepDef.back!,
-    }));
+    setVorgang((v) => {
+      if (!v) return v;
+      return {
+        ...v,
+        currentStepId: stepDef.back!,
+      };
+    });
   }
-
-  // ─────────────────────────────
-  // Seiteneffekte
-  // ─────────────────────────────
-  useEffect(() => {
-    if (stepDef.effect === "loadHello") {
-      setStatus("loading");
-      setError("");
-
-      fetchHello()
-        .then((result) => {
-          setData(result);
-          setStatus("success");
-        })
-        .catch(() => {
-          setError("Fehler beim Laden");
-          setStatus("error");
-        });
-    }
-  }, [vorgang.currentStepId, stepDef.effect]);
 
   // ─────────────────────────────
   // Render
