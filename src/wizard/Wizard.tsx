@@ -7,6 +7,8 @@ import type { ProcessDefinition, ProcessStep } from "./processTypes";
 
 import { loadProcessDefinition } from "./loadProcessDefinition";
 
+import WizardLayout from "./WizardLayout";
+
 /**
  * Wizard
  * ======
@@ -190,14 +192,16 @@ function Wizard() {
   // Render
   // ─────────────────────────────
   return (
-    <StepComponent
-      vorgang={vorgang}
-      onNext={nextStep}
-      onBack={prevStep}
-      status={status}
-      data={data}
-      error={error}
-    />
+    <WizardLayout>
+      <StepComponent
+        vorgang={vorgang}
+        onNext={nextStep}
+        onBack={prevStep}
+        status={status}
+        data={data}
+        error={error}
+      />
+    </WizardLayout>
   );
 }
 
