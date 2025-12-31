@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Vorgangsservice API
-  version: 1.0.0
+  version: 0.1.0
   description: >
     Der Vorgangsservice verwaltet ausschließlich:
     - Existenz eines Vorgangs
