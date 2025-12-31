@@ -3,12 +3,16 @@
   "steps": {
     "welcome": {
       "component": "WelcomeStep",
-      "next": "loadData"
+      "next": "unternehmensgegenstand"
     },
-    "loadData": {
-      "component": "LoadDataStep",
-      "effect": "loadHello",
+    "unternehmensgegenstand": {
+      "component": "UnternehmensgegenstandStep",
       "back": "welcome",
+      "next": "summary"
+    },
+    "summary": {
+      "component": "SummaryStep",
+      "back": "unternehmensgegenstand",
       "next": null
     }
   }

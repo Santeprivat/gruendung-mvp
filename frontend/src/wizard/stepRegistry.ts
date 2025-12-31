@@ -1,9 +1,11 @@
 import type { StepRegistry } from "./stepRegistryTypes";
 
 import WelcomeStep from "./steps/WelcomeStep";
-import LoadDataStep from "./steps/LoadDataStep";
+import UnternehmensgegenstandStep from "./steps/UnternehmensgegenstandStep";
+import SummaryStep from "./steps/SummaryStep";
 
 export const stepRegistry: StepRegistry = {
   WelcomeStep,
-  LoadDataStep,
+  UnternehmensgegenstandStep,
+  SummaryStep,
 };

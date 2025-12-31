@@ -10,7 +10,7 @@ export interface Vorgang {
   /**
    * Gesamtstatus des Vorgangs
    */
-  status: "IN_PROGRESS" | "DONE" | "ERROR";
+  status: "INITIIERT" | "IN_BEARBEITUNG" | "ABGESCHLOSSEN";
 
   /**
    * Aktueller Schritt im Prozess

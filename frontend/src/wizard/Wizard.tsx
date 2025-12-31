@@ -1,30 +1,41 @@
 import { useEffect, useState } from "react";
-import { fetchHello } from "../api/helloApi";
+
+import {
+  createVorgang,
+  updateVorgangDaten,
+  updateVorgangStatus,
+  getVorgang,
+} from "../api/vorgangsservice.api";
+
+import {
+  pruefeUnternehmensgegenstand,
+} from "../api/unternehmensgegenstandsservice.api";
+
 import { stepRegistry } from "./stepRegistry";
 
 import type { Vorgang } from "./vorgangTypes";
-import type { ProcessDefinition, ProcessStep } from "./processTypes";
+import type { ProcessDefinition } from "./processTypes";
 
 import { loadProcessDefinition } from "./loadProcessDefinition";
-
 import WizardLayout from "./WizardLayout";
+
+const UNTERNEHMENSGEGENSTAND_STEP_ID = "unternehmensgegenstand";
 
 /**
  * Wizard
  * ======
+ * Reiner Prozess-Interpreter.
  *
- * Prozess-Interpreter für den Unternehmenslebenszyklus.
+ * - sammelt Eingaben
+ * - ruft fachliche Services auf
+ * - speichert Ergebnisse im Vorgangsservice
+ * - lädt danach die Backend-Wahrheit neu
  *
- * - lädt eine Prozessdefinition (JSON)
- * - validiert diese zur Laufzeit
- * - interpretiert den Prozess
- * - sammelt fachliche Datenbeiträge (domainDataContributions)
- *
- * Fachliche Interpretation findet ausschließlich im Backend statt.
+ * KEINE fachlichen Entscheidungen im Frontend.
  */
 function Wizard() {
   // ─────────────────────────────
-  // Prozessdefinition (extern, JSON)
+  // Prozessdefinition
   // ─────────────────────────────
   const [processDefinition, setProcessDefinition] =
     useState<ProcessDefinition | null>(null);
@@ -32,160 +43,142 @@ function Wizard() {
     useState<string | null>(null);
 
   // ─────────────────────────────
-  // Vorgang (lokal, Mock)
+  // Vorgang (lokaler Spiegel des Backends)
   // ─────────────────────────────
   const [vorgang, setVorgang] = useState<Vorgang | null>(null);
 
   // ─────────────────────────────
-  // UI-Zustände für Seiteneffekte
+  // UI-Status
   // ─────────────────────────────
-  const [status, setStatus] = useState<
-    "idle" | "loading" | "success" | "error"
+  const [uiStatus, setUiStatus] = useState<
+    "idle" | "loading" | "error"
   >("idle");
-  const [data, setData] = useState<unknown>(null);
-  const [error, setError] = useState<string>("");
 
   // ─────────────────────────────
-  // Prozessdefinition laden (einmalig)
+  // Prozessdefinition laden
   // ─────────────────────────────
   useEffect(() => {
     loadProcessDefinition()
       .then(setProcessDefinition)
-      .catch((err) => setProcessError(err.message));
+      .catch((err) =>
+        setProcessError(err?.message ?? "Fehler beim Laden des Prozesses")
+      );
   }, []);
 
   // ─────────────────────────────
-  // Vorgang initialisieren, sobald Prozess da ist
+  // Vorgang im Backend anlegen
   // ─────────────────────────────
   useEffect(() => {
-    if (processDefinition && !vorgang) {
-      setVorgang({
-        id: "local-vorgang-1",
-        status: "IN_PROGRESS",
-        currentStepId: processDefinition.initialStep,
-        domainDataContributions: {},
+    if (!processDefinition || vorgang) return;
+
+    setUiStatus("loading");
+
+    createVorgang("GRUENDUNG")
+      .then((backendVorgang) => {
+        setVorgang({
+          id: backendVorgang.id,
+          status: backendVorgang.status,
+          currentStepId: processDefinition.initialStep,
+          domainDataContributions: {},
+        });
+        setUiStatus("idle");
+      })
+      .catch(() => {
+        setProcessError("Vorgang konnte nicht initialisiert werden");
+        setUiStatus("error");
       });
-    }
   }, [processDefinition, vorgang]);
 
   // ─────────────────────────────
-  // Seiteneffekte beim Betreten eines Schritts
-  //
-  // WICHTIG:
-  // Dieser Effekt darf NICHT vorzeitig returnen,
-  // da Hooks immer in gleicher Reihenfolge
-  // ausgeführt werden müssen.
+  // Guards
   // ─────────────────────────────
-  useEffect(() => {
-    if (!processDefinition || !vorgang) return;
-
-    const stepDef =
-      processDefinition.steps[vorgang.currentStepId];
-
-    if (stepDef?.effect === "loadHello") {
-      setStatus("loading");
-      setError("");
-
-      fetchHello()
-        .then((result) => {
-          setData(result);
-          setStatus("success");
-        })
-        .catch(() => {
-          setError("Fehler beim Laden");
-          setStatus("error");
-        });
-    }
-  }, [processDefinition, vorgang?.currentStepId]);
+  if (processError) return <p>Fehler: {processError}</p>;
+  if (!processDefinition) return <p>Lade Prozessdefinition …</p>;
+  if (!vorgang) return <p>Initialisiere Vorgang …</p>;
 
   // ─────────────────────────────
-  // Guards: Prozess & Vorgang
-  //
-  // Guards kommen NACH allen Hooks!
+  // Aktueller Schritt
   // ─────────────────────────────
-  if (processError) {
-    return <p>Fehler beim Laden des Prozesses: {processError}</p>;
+  const stepDef = processDefinition.steps[vorgang.currentStepId];
+  if (!stepDef) {
+    return <p>Unbekannter Schritt: {vorgang.currentStepId}</p>;
   }
 
-  if (!processDefinition) {
-    return <p>Lade Prozessdefinition …</p>;
-  }
-
-  if (!vorgang) {
-    return <p>Initialisiere Vorgang …</p>;
-  }
-
-  // ─────────────────────────────
-  // Aktuelle Schrittdefinition (unsicherer Zugriff)
-  // ─────────────────────────────
-  const stepDefUnsafe =
-    processDefinition.steps[vorgang.currentStepId];
-
-  if (!stepDefUnsafe) {
-    return (
-      <p>
-        Fehlerhafte Prozessdefinition: Schritt "{vorgang.currentStepId}" ist
-        nicht definiert.
-      </p>
-    );
-  }
-
-  // ─────────────────────────────
-  // Ab hier ist stepDef garantiert definiert
-  // ─────────────────────────────
-  const stepDef: ProcessStep = stepDefUnsafe;
-
-  // ─────────────────────────────
-  // Step-Komponente auflösen
-  // ─────────────────────────────
   const StepComponent = stepRegistry[stepDef.component];
-
   if (!StepComponent) {
-    return (
-      <p>
-        Fehlerhafte Prozessdefinition: Komponente "{stepDef.component}" ist
-        nicht registriert.
-      </p>
-    );
+    return <p>Unbekannte Komponente: {stepDef.component}</p>;
   }
 
   // ─────────────────────────────
-  // Prozess-Navigation: nextStep
-  //
-  // domainDataContribution:
-  // Fachlicher Datenbeitrag dieses Schritts
-  // im Unternehmenslebenszyklus.
+  // Next
   // ─────────────────────────────
-  function nextStep(domainDataContribution?: unknown) {
-    if (!stepDef.next) return;
+  async function nextStep(domainDataContribution?: unknown) {
+    if (!stepDef.next || !vorgang) return;
 
-    setVorgang((v) => {
-      if (!v) return v;
+    try {
+      setUiStatus("loading");
 
-      return {
-        ...v,
-        domainDataContributions: {
-          ...v.domainDataContributions,
-          [v.currentStepId]: domainDataContribution ?? null,
-        },
-        currentStepId: stepDef.next!,
-      };
-    });
+      // 🟦 Spezialfall: Unternehmensgegenstand
+      if (
+        vorgang.currentStepId === UNTERNEHMENSGEGENSTAND_STEP_ID &&
+        domainDataContribution
+      ) {
+        const ergebnis =
+          await pruefeUnternehmensgegenstand(
+            domainDataContribution as any
+          );
+
+        await updateVorgangDaten(vorgang.id, {
+          unternehmerischeAusgangslage: {
+            stand: "GEPRUEFT",
+            unternehmensgegenstand: ergebnis,
+          },
+        });
+      }
+      // 🟦 Standardfall
+      else if (domainDataContribution !== undefined) {
+        await updateVorgangDaten(vorgang.id, {
+          [vorgang.currentStepId]: domainDataContribution,
+        });
+      }
+
+      // Statuswechsel (blind, Backend entscheidet)
+      await updateVorgangStatus(vorgang.id, "IN_BEARBEITUNG");
+
+      // 🔑 ZENTRALER SCHRITT:
+      // Vorgang erneut aus dem Backend laden
+      const aktualisierterVorgang = await getVorgang(vorgang.id);
+
+      // Lokalen Wizard-State aktualisieren
+      setVorgang((v) =>
+        v
+          ? {
+              ...v,
+              status: aktualisierterVorgang.status,
+              domainDataContributions: {
+                ...v.domainDataContributions,
+                ...aktualisierterVorgang.daten,
+              },
+              currentStepId: stepDef.next!,
+            }
+          : v
+      );
+
+      setUiStatus("idle");
+    } catch {
+      setUiStatus("error");
+    }
   }
 
   // ─────────────────────────────
-  // Rücknavigation
+  // Back (rein lokal)
   // ─────────────────────────────
   function prevStep() {
     if (!stepDef.back) return;
 
-    setVorgang((v) => {
-      if (!v) return v;
-      return {
-        ...v,
-        currentStepId: stepDef.back!,
-      };
-    });
+    setVorgang((v) =>
+      v ? { ...v, currentStepId: stepDef.back! } : v
+    );
   }
 
   // ─────────────────────────────
@@ -197,9 +190,7 @@ function Wizard() {
         vorgang={vorgang}
         onNext={nextStep}
         onBack={prevStep}
-        status={status}
-        data={data}
-        error={error}
+        uiStatus={uiStatus}
       />
     </WizardLayout>
   );
