@@ -1,0 +1,234 @@
+openapi: 3.0.3
+info:
+  title: Vorgangsservice API
+  version: 1.0.0
+  description: >
+    Der Vorgangsservice verwaltet ausschließlich:
+    - Existenz eines Vorgangs
+    - Status des Vorgangs
+    - Daten (Tatsachen)
+    - Audit (Events)
+
+    Entscheidungen, Genehmigungen und Bewertungen
+    sind explizit ausgeschlossen.
+
+servers:
+  - url: http://localhost:3000
+
+paths:
+
+  /vorgaenge:
+    post:
+      summary: Vorgang anlegen
+      operationId: createVorgang
+      responses:
+        '201':
+          description: Vorgang wurde angelegt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vorgang'
+
+  /vorgaenge/{vorgangsId}:
+    get:
+      summary: Vorgang lesen
+      operationId: getVorgang
+      parameters:
+        - $ref: '#/components/parameters/VorgangsId'
+      responses:
+        '200':
+          description: Aktueller Stand des Vorgangs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vorgang'
+
+  /vorgaenge/{vorgangsId}/status:
+    patch:
+      summary: Status eines Vorgangs ändern
+      operationId: changeVorgangStatus
+      parameters:
+        - $ref: '#/components/parameters/VorgangsId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - neuerStatus
+              properties:
+                neuerStatus:
+                  $ref: '#/components/schemas/VorgangsStatus'
+      responses:
+        '204':
+          description: Status geändert
+
+  /vorgaenge/{vorgangsId}/daten:
+    post:
+      summary: Daten hinzufügen
+      operationId: addDaten
+      parameters:
+        - $ref: '#/components/parameters/VorgangsId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatenHinzugefuegt'
+      responses:
+        '204':
+          description: Daten hinzugefügt
+
+    patch:
+      summary: Daten ändern
+      operationId: changeDaten
+      parameters:
+        - $ref: '#/components/parameters/VorgangsId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatenGeaendert'
+      responses:
+        '204':
+          description: Daten geändert
+
+  /vorgaenge/{vorgangsId}/events:
+    get:
+      summary: Events eines Vorgangs lesen (Audit)
+      operationId: getVorgangsEvents
+      parameters:
+        - $ref: '#/components/parameters/VorgangsId'
+      responses:
+        '200':
+          description: Event-Liste
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+components:
+
+  parameters:
+    VorgangsId:
+      name: vorgangsId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+
+    Vorgang:
+      type: object
+      required:
+        - vorgangsId
+        - status
+      properties:
+        vorgangsId:
+          type: string
+        status:
+          $ref: '#/components/schemas/VorgangsStatus'
+        daten:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    VorgangsStatus:
+      type: string
+      enum:
+        - INITIIERT
+        - IN_BEARBEITUNG
+        - RUHEND
+        - EINGEREICHT
+        - IN_PRUEFUNG
+        - ABGESCHLOSSEN
+        - EINGESTELLT
+
+    DatenHinzugefuegt:
+      type: object
+      required:
+        - datenTyp
+        - wert
+        - quelle
+      properties:
+        datenTyp:
+          type: string
+        wert:
+          description: Frei strukturierter Wert
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: object
+            - type: array
+        quelle:
+          type: string
+          enum:
+            - antragsteller
+            - behoerde
+            - system
+            - foederation
+
+    DatenGeaendert:
+      type: object
+      required:
+        - datenTyp
+        - alterWert
+        - neuerWert
+        - quelle
+      properties:
+        datenTyp:
+          type: string
+        alterWert:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: object
+            - type: array
+        neuerWert:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: object
+            - type: array
+        quelle:
+          type: string
+          enum:
+            - antragsteller
+            - behoerde
+            - system
+            - foederation
+
+    Event:
+      type: object
+      required:
+        - eventType
+        - timestamp
+      properties:
+        eventType:
+          type: string
+          enum:
+            - VORGANG_INITIIERT
+            - VORGANG_STATUS_GEWECHSELT
+            - DATEN_HINZUGEFUEGT
+            - DATEN_GEÄNDERT
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
