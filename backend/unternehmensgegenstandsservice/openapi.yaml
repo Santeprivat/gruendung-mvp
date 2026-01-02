@@ -1,0 +1,429 @@
+openapi: 3.0.3
+info:
+  title: Unternehmensgegenstandsservice API
+  version: 0.1.0
+  description: >
+    Der Unternehmensgegenstandsservice ist ein fachlicher Entscheidungsservice,
+    der aus einer unscharfen Gründungsabsicht (Intent, Freitext) im gegebenen Kontext
+    (z.B. Jurisdiktion und Rechtsform) Tätigkeitsvorschläge (z.B. WZ-Schlüssel),
+    Klärungsbedarfe, Namensbewertungen und ggf. einen konsistenten Vorschlag (Proposal)
+    ableitet.
+
+    Der Service ist zustandslos (stateless) und speichert keine Daten.
+    Ein dialogbasierter Prozess entsteht durch wiederholte Aufrufe:
+    Das Frontend reichert den Request schrittweise mit resolvedFacts an, bis keine
+    Klärungsbedarfe mehr offen sind und ein Proposal erzeugt werden kann.
+
+servers:
+  - url: https://api.example.de/unternehmensgegenstand/v1
+    description: Beispielserver (in Produktion durch echte URL ersetzen)
+
+paths:
+  /evaluate:
+    post:
+      summary: Intent bewerten und fachlichen Vorschlag ermitteln
+      description: >
+        Bewertet eine Gründungsabsicht im gegebenen Kontext und liefert:
+        - activitySuggestions: fachliche Vorschläge für Tätigkeiten (z.B. WZ-Schlüssel),
+        - clarifications: fachlich notwendige Rückfragen (Dialogtreiber),
+        - companyNameAssessment: Bewertung der vorgeschlagenen Bezeichnung im Tätigkeitskontext,
+        - approvalRequirements: abgeleitete Genehmigungs-/Anzeigeerfordernisse,
+        - proposal: konsistenter Vorschlag (nur wenn keine Clarifications offen sind),
+        - overallResult: Zusammenfassung, ob abschließbar bzw. zulässig.
+
+        Das Frontend muss keinerlei Fachwissen über WZ-Schlüssel oder Genehmigungen besitzen;
+        es zeigt Vorschläge/Fragen an und sendet Antworten als resolvedFacts zurück.
+      operationId: evaluateIntent
+      requestBody:
+        required: true
+        description: >
+          Enthält Kontext (zwingend) und optional einen Intent (Freitext) sowie bereits
+          geklärte Tatsachen (resolvedFacts) aus vorigen Dialogrunden.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+      responses:
+        '200':
+          description: Fachliches Bewertungsergebnis (kein Persistenz-/Prozesszustand)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateResponse'
+
+components:
+  schemas:
+
+    EvaluateRequest:
+      type: object
+      description: >
+        Eingabe für die fachliche Bewertung. Der Service ist zustandslos; daher enthält
+        der Request alles, was für die Bewertung benötigt wird.
+      required:
+        - context
+      properties:
+        context:
+          $ref: '#/components/schemas/Context'
+        intent:
+          $ref: '#/components/schemas/Intent'
+        resolvedFacts:
+          type: array
+          description: >
+            Liste bereits geklärter Tatsachen, die aus Antworten des Antragstellers
+            stammen (z.B. Auswahl einer Option). Diese Fakten präzisieren den Intent
+            und ermöglichen eine eindeutige Einstufung.
+          items:
+            $ref: '#/components/schemas/ResolvedFact'
+        proposedCompanyName:
+          type: string
+          description: >
+            Optionaler Namensvorschlag des Antragstellers. Wird im Kontext der
+            (vorgeschlagenen/bestätigten) Tätigkeiten bewertet. Dies ist keine Registerprüfung,
+            sondern eine fachliche Plausibilitätsprüfung (z.B. Irreführungsrisiken).
+          example: "Muster Software GmbH"
+
+    Context:
+      type: object
+      description: >
+        Rahmenbedingungen, unter denen die Bewertung stattfindet. Kontext beeinflusst Regeln
+        (z.B. Genehmigungsableitungen oder Namenskonventionen).
+      required:
+        - jurisdiction
+        - legalForm
+      properties:
+        jurisdiction:
+          type: string
+          description: >
+            Jurisdiktion/Rechtsordnung, z.B. 'DE'. Dient zur Auswahl der relevanten Regelbasis.
+          example: "DE"
+        legalForm:
+          type: string
+          description: >
+            Rechtsform, z.B. 'GMBH'. Dient der fachlichen Bewertung und späterer Konsistenzprüfungen.
+            (Die konkrete Liste zulässiger Werte kann später als enum erweitert werden.)
+          example: "GMBH"
+
+    Intent:
+      type: object
+      description: >
+        Unstrukturierte Gründungsabsicht. Ein Intent ist nicht normiert und kann mehrdeutig sein.
+        Der Service interpretiert den Intent und erzeugt Vorschläge und ggf. Klärungsbedarfe.
+      required:
+        - description
+      properties:
+        description:
+          type: string
+          description: >
+            Freitextbeschreibung des Vorhabens durch den Antragsteller.
+            Beispiel: Tätigkeiten, Produkte, Zielgruppen, Vertriebswege.
+          example: "Ich möchte Software entwickeln, Webseiten bauen und IT-Beratung anbieten."
+
+    ResolvedFact:
+      type: object
+      description: >
+        Eine geklärte Tatsache, die eine frühere Clarification beantwortet oder den Intent präzisiert.
+        ResolvedFacts sind das „Wissen“, das der Antragsteller im Dialog nachliefert.
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          description: >
+            Identifikator des Faktentyps. Wird vom Service definiert (z.B. 'SOFTWARE_TYPE', 'HAS_RESELLING').
+            Der Client muss die Semantik nicht kennen, sondern übermittelt den Schlüssel, den er aus
+            einer Clarification-Option erhalten hat.
+          example: "SOFTWARE_TYPE"
+        value:
+          type: string
+          description: >
+            Wert des Faktentyps. Typischerweise der Code einer gewählten Option oder eine kurze Eingabe.
+            In späteren Versionen kann dies zu typed values erweitert werden.
+          example: "STANDARD"
+        sourceClarificationId:
+          type: string
+          description: >
+            Optional: Referenz auf die Clarification.id, aus der diese Tatsache entstanden ist.
+            Hilfreich zur Nachvollziehbarkeit im Dialog, aber nicht zwingend.
+          example: "IT_SCOPE"
+
+    EvaluateResponse:
+      type: object
+      description: >
+        Ergebnis einer Bewertung. Enthält Vorschläge und Rückfragen für den Dialog.
+        Ein Proposal wird nur geliefert, wenn keine offenen Klärungsbedarfe existieren
+        und keine verbotenen Kombinationen erkannt wurden.
+      required:
+        - activitySuggestions
+        - clarifications
+        - approvalRequirements
+        - overallResult
+      properties:
+        activitySuggestions:
+          type: array
+          description: >
+            Vorschläge für Tätigkeiten (z.B. WZ-Schlüssel), die aus Intent und Facts abgeleitet wurden.
+            Die Liste kann Alternativen enthalten; das Frontend zeigt sie an, ohne sie fachlich zu interpretieren.
+          items:
+            $ref: '#/components/schemas/ActivitySuggestion'
+        clarifications:
+          type: array
+          description: >
+            Fachlich notwendige Rückfragen. Solange diese Liste nicht leer ist, ist der Dialog
+            fachlich unvollständig und ein Proposal wird i.d.R. nicht erzeugt.
+          items:
+            $ref: '#/components/schemas/Clarification'
+        companyNameAssessment:
+          $ref: '#/components/schemas/CompanyNameAssessment'
+        approvalRequirements:
+          type: array
+          description: >
+            Abgeleitete Genehmigungs-/Anzeigeerfordernisse auf Basis der aktuellen Faktenlage.
+            In frühen Dialogphasen können diese als „potenziell“ interpretiert werden; die Begründung
+            macht deutlich, welche Annahmen/Abgrenzungen relevant sind.
+          items:
+            $ref: '#/components/schemas/ApprovalRequirement'
+        proposal:
+          $ref: '#/components/schemas/Proposal'
+        overallResult:
+          type: string
+          description: >
+            Zusammenfassung des aktuellen Zustands:
+            - INCOMPLETE: Es bestehen Klärungsbedarfe; kein konsistenter Abschluss möglich.
+            - ALLOWED: Ein konsistenter Vorschlag ist möglich (proposal vorhanden).
+            - NOT_ALLOWED: Im gegebenen Kontext nicht zulässig (auch nach Klärung nicht behebbar).
+          enum:
+            - INCOMPLETE
+            - ALLOWED
+            - NOT_ALLOWED
+
+    ActivitySuggestion:
+      type: object
+      description: >
+        Vorschlag einer Tätigkeit (z.B. WZ-Schlüssel) inklusive Erklärung. Dies ist ein Vorschlag,
+        keine finale Festlegung; finale Festlegung erfolgt in Proposal.activities, sobald konsistent.
+      required:
+        - wzCode
+        - label
+      properties:
+        wzCode:
+          type: string
+          description: >
+            WZ-Schlüssel der vorgeschlagenen Tätigkeit. Das Frontend muss den Code nicht kennen/prüfen,
+            sondern lediglich anzeigen und ggf. im Proposal speichern lassen.
+          example: "62.01"
+        label:
+          type: string
+          description: Fachliche Bezeichnung der Tätigkeit (menschenlesbar).
+          example: "Erbringung von Dienstleistungen der Informationstechnologie"
+        confidence:
+          type: number
+          format: float
+          description: >
+            Heuristischer Vertrauensgrad (0..1) der Zuordnung aus dem Intent.
+            Dient nur zur Transparenz/UX; Entscheidungen werden deterministisch durch Regeln getroffen.
+          example: 0.82
+        justification:
+          type: string
+          description: >
+            Kurze Begründung, warum dieser Vorschlag gemacht wird (z.B. welche Textteile/ Fakten relevant waren).
+          example: "Abgeleitet aus den Angaben zur Softwareentwicklung und IT-Beratung."
+        ruleRefs:
+          type: array
+          description: >
+            Optionale Referenzen auf Regel-IDs, die zur Ableitung beigetragen haben.
+            Unterstützt Nachvollziehbarkeit/Audit.
+          items:
+            type: string
+          example: ["INTENT_IT_SOFTWARE_001"]
+
+    Clarification:
+      type: object
+      description: >
+        Klärungsbedarf, der den Dialog antreibt. Der Client stellt die question und bietet options an.
+        Die Antwort wird als ResolvedFact zurückgesendet (key/value aus Option).
+      required:
+        - id
+        - question
+      properties:
+        id:
+          type: string
+          description: Stabiler Identifier der Rückfrage (für Nachvollziehbarkeit).
+          example: "IT_SCOPE"
+        question:
+          type: string
+          description: Frage an den Antragsteller in natürlicher Sprache.
+          example: "Bezieht sich die Softwareentwicklung auf Individualsoftware oder Standardsoftware?"
+        options:
+          type: array
+          description: >
+            Antwortoptionen. Wenn leer, kann der Client Freitext erlauben und als ResolvedFact.value senden
+            (MVP: bevorzugt strukturierte Optionen).
+          items:
+            $ref: '#/components/schemas/ClarificationOption'
+        impact:
+          type: string
+          description: >
+            Hinweis, warum die Klärung relevant ist (z.B. „beeinflusst Genehmigungspflichten“).
+            Dient der Transparenz.
+          example: "Beeinflusst WZ-Zuordnung und mögliche Genehmigungspflichten"
+        severity:
+          type: string
+          description: >
+            Einstufung der Bedeutung:
+            - BLOCKING: ohne Antwort kein Proposal
+            - NON_BLOCKING: hilfreich, aber nicht zwingend (später selten)
+          enum: [BLOCKING, NON_BLOCKING]
+          example: "BLOCKING"
+        ruleRefs:
+          type: array
+          description: Optionale Referenzen auf Regeln, die diese Clarification ausgelöst haben.
+          items:
+            type: string
+          example: ["DISAMBIGUATE_SOFTWARE_TYPE_010"]
+
+    ClarificationOption:
+      type: object
+      description: >
+        Eine auswählbare Antwort. Der Client sendet die Antwort als ResolvedFact zurück.
+      required:
+        - factKey
+        - code
+        - label
+      properties:
+        factKey:
+          type: string
+          description: >
+            Der Schlüssel, unter dem die Antwort als ResolvedFact.key zurückgesendet werden soll.
+            Damit bleibt das Frontend fachlich ahnungslos: es transportiert nur den Schlüssel.
+          example: "SOFTWARE_TYPE"
+        code:
+          type: string
+          description: >
+            Maschinenlesbarer Code der Option; wird als ResolvedFact.value zurückgesendet.
+          example: "STANDARD"
+        label:
+          type: string
+          description: Menschenlesbarer Text zur Option.
+          example: "Entwicklung und Vertrieb von Standardsoftware"
+
+    CompanyNameAssessment:
+      type: object
+      description: >
+        Fachliche Plausibilitätsbewertung des vorgeschlagenen Namens im Kontext der Tätigkeiten.
+        Keine Registerprüfung und keine rechtlich verbindliche Aussage, sondern Risiko-/Hinweislogik.
+      properties:
+        result:
+          type: string
+          description: Ergebnis der Plausibilitätsbewertung.
+          enum:
+            - ALLOWED
+            - RISKY
+            - NOT_ALLOWED
+        notes:
+          type: array
+          description: Begründungen/Hinweise (für UI-Anzeige).
+          items:
+            type: string
+          example:
+            - "Bezeichnung ist branchenüblich und nicht irreführend."
+        ruleRefs:
+          type: array
+          description: Optionale Referenzen auf Namensregeln.
+          items:
+            type: string
+          example: ["NAME_NOT_MISLEADING_020"]
+
+    ApprovalRequirement:
+      type: object
+      description: >
+        Abgeleitetes Genehmigungs-/Anzeigeerfordernis. Das ist keine Genehmigung selbst,
+        sondern ein Hinweis auf erforderliche Schritte/Prüfungen.
+      required:
+        - type
+        - required
+      properties:
+        type:
+          type: string
+          description: >
+            Typ/Gruppe des Erfordernisses (MVP: String). In späteren Versionen als enum/komplexer Typ.
+          example: "TRADE"
+        required:
+          type: boolean
+          description: >
+            true, wenn das Erfordernis nach aktueller Faktenlage verpflichtend ist.
+            false, wenn es (noch) nicht erforderlich ist oder nur potenziell relevant.
+          example: false
+        justification:
+          type: string
+          description: >
+            Begründung, warum dieses Erfordernis (nicht) abgeleitet wurde.
+          example: "Reine IT-Dienstleistungen sind in der Regel genehmigungsfrei."
+        dependsOnClarificationIds:
+          type: array
+          description: >
+            Optional: Liste von Clarification-IDs, deren Beantwortung dieses Erfordernis beeinflusst.
+            Unterstützt Transparenz („wenn X, dann Y“).
+          items:
+            type: string
+          example: ["IT_SCOPE"]
+        ruleRefs:
+          type: array
+          description: Optionale Referenzen auf Ableitungsregeln.
+          items:
+            type: string
+          example: ["APPROVAL_GEW_001"]
+
+    Proposal:
+      type: object
+      description: >
+        Konsistenter fachlicher Vorschlag. Wird nur geliefert, wenn:
+        - keine BLOCKING clarifications mehr offen sind,
+        - keine verbotenen Kombinationen erkannt wurden.
+        Dieser Vorschlag ist zur Speicherung im Vorgangsservice gedacht.
+      required:
+        - activities
+      properties:
+        activities:
+          type: array
+          description: Finalisierte Tätigkeiten, die aus Intent/Facts konsolidiert wurden.
+          items:
+            $ref: '#/components/schemas/ConfirmedActivity'
+        companyName:
+          type: string
+          description: Konsolidierte Unternehmensbezeichnung (falls vorhanden).
+          example: "Muster Software GmbH"
+        approvals:
+          type: array
+          description: Finalisierte Liste abgeleiteter Genehmigungserfordernisse.
+          items:
+            $ref: '#/components/schemas/ApprovalRequirement'
+        explanation:
+          type: string
+          description: >
+            Optionaler Gesamttext zur Erklärung, warum der Proposal konsistent ist
+            (für Summary/Transparenz).
+          example: "Die Angaben wurden eindeutig zu IT-Dienstleistungen zugeordnet; keine Genehmigungen erforderlich."
+        ruleSnapshot:
+          type: object
+          description: >
+            Optional: Metadaten über Regelstand (Versionen/IDs). Unterstützt Auditability ohne Persistenz im Service.
+          additionalProperties: true
+
+    ConfirmedActivity:
+      type: object
+      description: >
+        Bestätigte Tätigkeit im Proposal. Im Unterschied zu ActivitySuggestion ist dies der konsolidierte,
+        „finale“ Vorschlag, der im Vorgangsservice gespeichert werden kann.
+      required:
+        - wzCode
+        - label
+      properties:
+        wzCode:
+          type: string
+          description: WZ-Schlüssel der bestätigten Tätigkeit.
+          example: "62.01"
+        label:
+          type: string
+          description: Menschenlesbare Bezeichnung.
+          example: "IT-Dienstleistungen"

@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: Namensprüfungsservice API
+  version: 0.1.0
+  description: >
+    Der Namensprüfungsservice ist ein externer, zustandsloser Prüfservice zur
+    rechtlichen Verfügbarkeitsprüfung von Unternehmensnamen.
+
+    Die Prüfung erfolgt abhängig von:
+    - Jurisdiktion (z.B. DE)
+    - Rechtsform (z.B. GmbH)
+    - zuständigem Register oder Verzeichnis (z.B. Handelsregister, Kammern)
+
+    Der Service trifft keine Prozessentscheidungen und speichert keine Daten.
+    Er liefert ausschließlich Prüfergebnisse zur weiteren Orchestrierung.
+
+servers:
+  - url: https://api.example.de/namenspruefung/v1
+    description: Beispielserver
+
+paths:
+  /check:
+    post:
+      summary: Rechtliche Verfügbarkeitsprüfung eines Unternehmensnamens
+      description: >
+        Prüft die rechtliche Verfügbarkeit eines vorgeschlagenen Unternehmensnamens
+        im Kontext von Jurisdiktion und Rechtsform.
+
+        Die Prüfung kann je nach Rechtsform unterschiedliche Register betreffen
+        (z.B. Handelsregister bei GmbH, Kammern bei anderen Rechtsformen).
+
+        Das Ergebnis ist rein fachlich/juristisch und enthält keine Entscheidung
+        über den weiteren Prozess.
+      operationId: checkCompanyName
+      requestBody:
+        required: true
+        description: Prüfanfrage für einen Unternehmensnamen
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NameCheckRequest'
+      responses:
+        '200':
+          description: Ergebnis der Namensverfügbarkeitsprüfung
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NameCheckResponse'
+
+components:
+  schemas:
+
+    NameCheckRequest:
+      type: object
+      description: >
+        Anfrage zur rechtlichen Namensprüfung.
+        Enthält alle Informationen, die zur Auswahl der zuständigen
+        Register und Prüfregeln notwendig sind.
+      required:
+        - context
+        - companyName
+      properties:
+        context:
+          $ref: '#/components/schemas/Context'
+        companyName:
+          type: string
+          description: >
+            Der zu prüfende Unternehmensname in der vorgeschlagenen Schreibweise.
+            Der Service kann intern Normalisierungen (Groß-/Kleinschreibung,
+            Sonderzeichen) vornehmen.
+          example: "Muster Software GmbH"
+
+    Context:
+      type: object
+      description: >
+        Rahmenbedingungen für die Namensprüfung.
+        Bestimmen, welche Register oder Verzeichnisse heranzuziehen sind.
+      required:
+        - jurisdiction
+        - legalForm
+      properties:
+        jurisdiction:
+          type: string
+          description: >
+            Jurisdiktion / Rechtsordnung, z.B. 'DE'.
+          example: "DE"
+        legalForm:
+          type: string
+          description: >
+            Rechtsform des Unternehmens, z.B. 'GMBH'.
+            Die Rechtsform steuert die Auswahl der zuständigen Register.
+          example: "GMBH"
+
+    NameCheckResponse:
+      type: object
+      description: >
+        Ergebnis der Namensprüfung. Enthält die zusammengefasste Bewertung
+        sowie Details zu den durchgeführten Prüfungen.
+      required:
+        - availability
+        - checkedSources
+      properties:
+        availability:
+          type: string
+          description: >
+            Zusammenfassendes Ergebnis der Namensprüfung:
+            - AVAILABLE: Keine Konflikte festgestellt
+            - CONFLICT: Name ist bereits vergeben oder verwechslungsfähig
+            - UNKNOWN: Keine eindeutige Aussage möglich (z.B. Register nicht erreichbar)
+          enum:
+            - AVAILABLE
+            - CONFLICT
+            - UNKNOWN
+        checkedSources:
+          type: array
+          description: >
+            Liste der Register oder Verzeichnisse, gegen die geprüft wurde.
+            Dient der Transparenz und Nachvollziehbarkeit.
+          items:
+            $ref: '#/components/schemas/RegisterSource'
+        conflicts:
+          type: array
+          description: >
+            Optionale Liste erkannter Konflikte oder ähnlicher Namen.
+            Nur relevant bei availability = CONFLICT.
+          items:
+            $ref: '#/components/schemas/NameConflict'
+        notes:
+          type: array
+          description: >
+            Ergänzende Hinweise oder Erläuterungen zur Prüfung
+            (z.B. Einschränkungen, Unsicherheiten).
+          items:
+            type: string
+        ruleRefs:
+          type: array
+          description: >
+            Optionale Referenzen auf fachliche oder rechtliche Regeln,
+            die zur Bewertung herangezogen wurden.
+          items:
+            type: string
+
+    RegisterSource:
+      type: object
+      description: >
+        Beschreibung eines Registers oder Verzeichnisses,
+        das für die Namensprüfung herangezogen wurde.
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          description: Bezeichnung des Registers oder der Quelle.
+          example: "Handelsregister"
+        type:
+          type: string
+          description: Art der Quelle.
+          enum:
+            - REGISTER
+            - CHAMBER
+            - OTHER
+        jurisdiction:
+          type: string
+          description: Jurisdiktion, auf die sich die Quelle bezieht.
+          example: "DE"
+
+    NameConflict:
+      type: object
+      description: >
+        Beschreibung eines gefundenen Namenskonflikts oder einer
+        möglichen Verwechslungsgefahr.
+      required:
+        - conflictingName
+      properties:
+        conflictingName:
+          type: string
+          description: Bereits existierender oder ähnlicher Name.
+          example: "Muster Software Solutions GmbH"
+        source:
+          type: string
+          description: Quelle, in der der Konflikt gefunden wurde.
+          example: "Handelsregister"
+        similarityNote:
+          type: string
+          description: >
+            Erläuterung, warum eine Verwechslungsgefahr angenommen wird.
+          example: "Sehr ähnliche Firmierung im gleichen Tätigkeitsfeld."
